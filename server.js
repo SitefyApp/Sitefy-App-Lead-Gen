@@ -41,9 +41,10 @@ app.post('/api/reverse-ip-append', authenticate, async (req, res) => {
     const datazappUrl = 'https://secureapi.datazapp.com/Appendv2';
     
     const datazappPayload = {
-      Token: process.env.DATAZAPP_TOKEN,
-      IPAddresses: ipAddresses
-    };
+  User: process.env.DATAZAPP_USER,
+  Password: process.env.DATAZAPP_PASSWORD,
+  IPAddress: ipAddresses[0] // DataZapp v2 API takes single IP
+};
 
     console.log(`Processing ${ipAddresses.length} IP addresses...`);
 
