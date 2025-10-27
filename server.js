@@ -38,7 +38,7 @@ app.post('/api/reverse-ip-append', authenticate, async (req, res) => {
     }
 
     // DataZapp Reverse IP Append API endpoint
-    const datazappUrl = 'http://ipapi.datazapp.com/api/ReverseIPAppend';
+    const datazappUrl = 'https://secureapi.datazapp.com/Appendv2';
     
     const datazappPayload = {
       Token: process.env.DATAZAPP_TOKEN,
