@@ -41,13 +41,13 @@ app.post('/api/reverse-ip-append', authenticate, async (req, res) => {
     const datazappUrl = 'https://secureapi.datazapp.com/Appendv2';
     
     const datazappPayload = {
-  User: process.env.DATAZAPP_USER,
-  Password: process.env.DATAZAPP_PASSWORD,
-  IPAddress: ipAddresses[0] // DataZapp v2 API takes single IP
-};
+      User: process.env.DATAZAPP_USER,
+      Password: process.env.DATAZAPP_PASSWORD,
+      IPAddress: ipAddresses[0] // DataZapp v2 API takes single IP
+    };
 
     console.log(`Processing ${ipAddresses.length} IP addresses...`);
-
+    
     const response = await axios.post(datazappUrl, datazappPayload, {
       headers: {
         'Content-Type': 'application/json'
@@ -55,10 +55,21 @@ app.post('/api/reverse-ip-append', authenticate, async (req, res) => {
       timeout: 30000 // 30 second timeout
     });
 
+    // ✅ FIXED: Pass through the actual DataZapp response fields
+    const data = response.data;
+    
     res.json({
-      success: true,
-      data: response.data,
-      processed: ipAddresses.length
+      FirstName: data.FirstName || '',
+      LastName: data.LastName || '',
+      Email: data.Email || '',
+      Phone: data.Phone || '',
+      Cell: data.Cell || '',
+      Address: data.Address || '',
+      City: data.City || '',
+      State: data.State || '',
+      ZipCode: data.ZipCode || '',
+      Cell_DNC: data.Cell_DNC || false,
+      Phone_DNC: data.Phone_DNC || false
     });
 
   } catch (error) {
@@ -78,7 +89,7 @@ app.post('/api/visitor-pixel-data', authenticate, async (req, res) => {
     const { pixelId, startDate, endDate } = req.body;
     
     // DataZapp Visitor Pixel API endpoint
-    const datazappUrl = 'https://api.datazapp.com/v1/pixel/visitors'; // Update with actual endpoint
+    const datazappUrl = 'https://api.datazapp.com/v1/pixel/visitors';
     
     const datazappPayload = {
       Token: process.env.DATAZAPP_TOKEN,
