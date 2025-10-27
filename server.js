@@ -26,7 +26,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'DataZapp Proxy Server Running' });
 });
 
-// Reverse IP Append endpoint - SIMPLE PASS-THROUGH
+// Reverse IP Append endpoint - CORRECTED FOR DATAZAPP API
 app.post('/api/reverse-ip-append', authenticate, async (req, res) => {
   try {
     const { ipAddresses } = req.body;
@@ -39,13 +39,14 @@ app.post('/api/reverse-ip-append', authenticate, async (req, res) => {
 
     console.log(`Processing ${ipAddresses.length} IP addresses...`);
     
-    // Call DataZapp API
+    // Call DataZapp API with CORRECT format
     const response = await axios.post(
       'https://secureapi.datazapp.com/Appendv2',
       {
-        User: process.env.DATAZAPP_USER,
-        Password: process.env.DATAZAPP_PASSWORD,
-        IPAddress: ipAddresses[0]
+        ApiKey: process.env.DATAZAPP_API_KEY,
+        AppendModule: 'ReverseIPAppend',
+        AppendType: 2,  // MUST be number 2, not string
+        Data: ipAddresses.map(ip => ({ IPAddress: ip }))
       },
       {
         headers: { 'Content-Type': 'application/json' },
@@ -53,12 +54,15 @@ app.post('/api/reverse-ip-append', authenticate, async (req, res) => {
       }
     );
 
-    // ✅ CRITICAL: Return DataZapp response EXACTLY as-is
-    // Don't transform, don't wrap, just pass it through
+    console.log('DataZapp response received:', JSON.stringify(response.data, null, 2));
+    
+    // Return DataZapp response exactly as-is
     return res.json(response.data);
 
   } catch (error) {
     console.error('DataZapp API Error:', error.message);
+    console.error('Error response:', error.response?.data);
+    console.error('Error status:', error.response?.status);
     
     return res.status(error.response?.status || 500).json({
       error: error.message,
