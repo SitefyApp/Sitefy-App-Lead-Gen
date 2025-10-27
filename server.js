@@ -26,7 +26,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'DataZapp Proxy Server Running' });
 });
 
-// Reverse IP Append endpoint - CORRECTED FOR DATAZAPP API
+// Reverse IP Append endpoint - CORRECTED WITH IP FIELD
 app.post('/api/reverse-ip-append', authenticate, async (req, res) => {
   try {
     const { ipAddresses } = req.body;
@@ -39,14 +39,14 @@ app.post('/api/reverse-ip-append', authenticate, async (req, res) => {
 
     console.log(`Processing ${ipAddresses.length} IP addresses...`);
     
-    // Call DataZapp API with CORRECT format
+    // Call DataZapp API with CORRECT format (using IP, not IPAddress)
     const response = await axios.post(
       'https://secureapi.datazapp.com/Appendv2',
       {
         ApiKey: process.env.DATAZAPP_API_KEY,
         AppendModule: 'ReverseIPAppend',
         AppendType: 2,  // MUST be number 2, not string
-        Data: ipAddresses.map(ip => ({ IPAddress: ip }))
+        Data: ipAddresses.map(ip => ({ IP: ip }))  // ✅ FIXED: Use IP instead of IPAddress
       },
       {
         headers: { 'Content-Type': 'application/json' },
