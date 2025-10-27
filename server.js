@@ -26,7 +26,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'DataZapp Proxy Server Running' });
 });
 
-// Reverse IP Append endpoint - CORRECTED WITH IP FIELD
+// Reverse IP Append endpoint - EXTRACT PERSON DATA FROM WRAPPER
 app.post('/api/reverse-ip-append', authenticate, async (req, res) => {
   try {
     const { ipAddresses } = req.body;
@@ -39,14 +39,14 @@ app.post('/api/reverse-ip-append', authenticate, async (req, res) => {
 
     console.log(`Processing ${ipAddresses.length} IP addresses...`);
     
-    // Call DataZapp API with CORRECT format (using IP, not IPAddress)
+    // Call DataZapp API with correct format
     const response = await axios.post(
       'https://secureapi.datazapp.com/Appendv2',
       {
         ApiKey: process.env.DATAZAPP_API_KEY,
         AppendModule: 'ReverseIPAppend',
-        AppendType: 2,  // MUST be number 2, not string
-        Data: ipAddresses.map(ip => ({ IP: ip }))  // ✅ FIXED: Use IP instead of IPAddress
+        AppendType: 2,
+        Data: ipAddresses.map(ip => ({ IP: ip }))
       },
       {
         headers: { 'Content-Type': 'application/json' },
@@ -54,13 +54,31 @@ app.post('/api/reverse-ip-append', authenticate, async (req, res) => {
       }
     );
 
-    console.log('DataZapp response received:', JSON.stringify(response.data, null, 2));
+    console.log('✅ DataZapp full response:', JSON.stringify(response.data, null, 2));
     
-    // Return DataZapp response exactly as-is
-    return res.json(response.data);
+    // CRITICAL FIX: Extract the person data from the nested Data array
+    const datazappResponse = response.data;
+    
+    // Check if we got data
+    if (!datazappResponse.Data || !Array.isArray(datazappResponse.Data) || datazappResponse.Data.length === 0) {
+      console.log('⚠️ No person data in DataZapp response');
+      return res.status(404).json({
+        error: 'No data available for this IP',
+        details: {
+          count: datazappResponse.Count,
+          processedTime: datazappResponse.ProcessedTime
+        }
+      });
+    }
+
+    // Return just the first person record (what the edge function expects)
+    const personData = datazappResponse.Data[0];
+    console.log('✅ Extracted person data:', JSON.stringify(personData, null, 2));
+    
+    return res.json(personData);
 
   } catch (error) {
-    console.error('DataZapp API Error:', error.message);
+    console.error('❌ DataZapp API Error:', error.message);
     console.error('Error response:', error.response?.data);
     console.error('Error status:', error.response?.status);
     
