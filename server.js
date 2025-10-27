@@ -26,7 +26,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'DataZapp Proxy Server Running' });
 });
 
-// Reverse IP Append endpoint
+// Reverse IP Append endpoint - SIMPLE PASS-THROUGH
 app.post('/api/reverse-ip-append', authenticate, async (req, res) => {
   try {
     const { ipAddresses } = req.body;
@@ -37,46 +37,30 @@ app.post('/api/reverse-ip-append', authenticate, async (req, res) => {
       });
     }
 
-    // DataZapp Reverse IP Append API endpoint
-    const datazappUrl = 'https://secureapi.datazapp.com/Appendv2';
-    
-    const datazappPayload = {
-      User: process.env.DATAZAPP_USER,
-      Password: process.env.DATAZAPP_PASSWORD,
-      IPAddress: ipAddresses[0] // DataZapp v2 API takes single IP
-    };
-
     console.log(`Processing ${ipAddresses.length} IP addresses...`);
     
-    const response = await axios.post(datazappUrl, datazappPayload, {
-      headers: {
-        'Content-Type': 'application/json'
+    // Call DataZapp API
+    const response = await axios.post(
+      'https://secureapi.datazapp.com/Appendv2',
+      {
+        User: process.env.DATAZAPP_USER,
+        Password: process.env.DATAZAPP_PASSWORD,
+        IPAddress: ipAddresses[0]
       },
-      timeout: 30000 // 30 second timeout
-    });
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 30000
+      }
+    );
 
-    // ✅ FIXED: Pass through the actual DataZapp response fields
-    const data = response.data;
-    
-    res.json({
-      FirstName: data.FirstName || '',
-      LastName: data.LastName || '',
-      Email: data.Email || '',
-      Phone: data.Phone || '',
-      Cell: data.Cell || '',
-      Address: data.Address || '',
-      City: data.City || '',
-      State: data.State || '',
-      ZipCode: data.ZipCode || '',
-      Cell_DNC: data.Cell_DNC || false,
-      Phone_DNC: data.Phone_DNC || false
-    });
+    // ✅ CRITICAL: Return DataZapp response EXACTLY as-is
+    // Don't transform, don't wrap, just pass it through
+    return res.json(response.data);
 
   } catch (error) {
     console.error('DataZapp API Error:', error.message);
     
-    res.status(error.response?.status || 500).json({
-      success: false,
+    return res.status(error.response?.status || 500).json({
       error: error.message,
       details: error.response?.data
     });
@@ -88,7 +72,6 @@ app.post('/api/visitor-pixel-data', authenticate, async (req, res) => {
   try {
     const { pixelId, startDate, endDate } = req.body;
     
-    // DataZapp Visitor Pixel API endpoint
     const datazappUrl = 'https://api.datazapp.com/v1/pixel/visitors';
     
     const datazappPayload = {
@@ -129,7 +112,6 @@ app.post('/api/datazapp-proxy', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'endpoint is required' });
     }
 
-    // Add token to payload automatically
     const datazappPayload = {
       Token: process.env.DATAZAPP_TOKEN,
       ...payload
