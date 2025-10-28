@@ -1,4 +1,3 @@
-require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -6,114 +5,192 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Environment variables
-const DATAZAPP_API_KEY = process.env.DATAZAPP_API_KEY;
-const DATAZAPP_API_URL = process.env.DATAZAPP_API_URL || 'https://secureapi.datazapp.com/Appendv2';
-const PROXY_API_KEY = process.env.PROXY_API_KEY;
-
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// API Key authentication middleware
-const authenticateApiKey = (req, res, next) => {
-  const apiKey = req.headers['x-api-key'];
-  
-  if (!apiKey || apiKey !== PROXY_API_KEY) {
-    return res.status(401).json({ error: 'Unauthorized: Invalid API key' });
-  }
-  
-  next();
-};
-
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/', (req, res) => {
   res.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    environment: {
-      hasDataZappKey: !!DATAZAPP_API_KEY,
-      hasProxyKey: !!PROXY_API_KEY,
-      datazappUrl: DATAZAPP_API_URL
+    status: 'DataZapp Proxy Server Running',
+    endpoints: {
+      reverseIpAppend: '/api/reverse-ip-append',
+      test: '/api/test'
     }
   });
 });
 
-// Test endpoint for DataZapp API
-app.post('/api/test', authenticateApiKey, async (req, res) => {
+// Reverse IP Append endpoint
+app.post('/api/reverse-ip-append', async (req, res) => {
   try {
-    console.log('🧪 Test endpoint called');
-    console.log('📝 Request body:', JSON.stringify(req.body, null, 2));
-    
-    const { ipAddress } = req.body;
-    
-    if (!ipAddress) {
+    const { ip } = req.body;
+    const datazappKey = process.env.DATAZAPP_API_KEY;
+
+    if (!datazappKey) {
+      console.error('❌ DATAZAPP_API_KEY not configured');
+      return res.status(500).json({ error: 'DataZapp API key not configured' });
+    }
+
+    if (!ip) {
       return res.status(400).json({ error: 'IP address is required' });
     }
 
-    console.log('🔍 Testing IP:', ipAddress);
-    console.log('🔑 Using API Key:', DATAZAPP_API_KEY ? `${DATAZAPP_API_KEY.substring(0, 4)}...${DATAZAPP_API_KEY.slice(-4)}` : 'MISSING');
-    console.log('🌐 API URL:', DATAZAPP_API_URL);
+    console.log(`🔍 Processing IP: ${ip}`);
 
-    // DataZapp v2 API format
-    const requestBody = {
-      ApiKey: DATAZAPP_API_KEY,
-      AppendModule: 'ReverseIPAppend',
-      AppendType: 2,  // Changed to AppendType 2
-      Data: [
-        {
-          IP: ipAddress
+    // Call DataZapp v2 API with AppendType 2
+    const datazappResponse = await axios.post(
+      'https://secureapi.datazapp.com/Appendv2',
+      {
+        APIKey: datazappKey,
+        AppendType: 2,
+        Records: [
+          {
+            IPAddress: ip
+          }
+        ]
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+
+    console.log('📦 Full DataZapp Response Status:', datazappResponse.status);
+    console.log('📦 Response Structure:', JSON.stringify(datazappResponse.data, null, 2));
+
+    // Access nested contact data from ResponseDetail.Data[0]
+    const contactData = datazappResponse.data?.ResponseDetail?.Data?.[0];
+    
+    if (!contactData) {
+      console.log('⚠️ No contact data found in response');
+      return res.status(404).json({ 
+        error: 'No data available for this IP',
+        message: 'Empty response from DataZapp'
+      });
+    }
+
+    console.log('📋 Contact Data Found:', JSON.stringify(contactData, null, 2));
+
+    // Check if we have personal contact information (not just IP location data)
+    const hasPersonalData = contactData.FirstName || 
+                           contactData.LastName || 
+                           contactData.Email || 
+                           contactData.Cell || 
+                           contactData.Phone;
+
+    if (!hasPersonalData) {
+      console.log('⚠️ Only IP location data available, no personal contact info');
+      return res.status(404).json({ 
+        error: 'No personal contact data available for this IP',
+        message: 'Only IP location data found',
+        location: {
+          city: contactData.IPCity || contactData.City,
+          state: contactData.IPState || contactData.State,
+          country: contactData.IPCountry || contactData.Country
         }
-      ]
+      });
+    }
+
+    // Map DataZapp fields to expected format
+    const mappedData = {
+      // Personal Information
+      FirstName: contactData.FirstName || contactData.DataZapp_First || null,
+      LastName: contactData.LastName || contactData.DataZapp_Last || null,
+      Email: contactData.Email || contactData.DataZapp_Email || null,
+      Phone: contactData.Cell || contactData.Phone || contactData.DataZapp_Cell || null,
+      
+      // Address Information
+      Address: contactData.Address || contactData.DataZapp_Address || null,
+      Address2: contactData.Address2 || contactData.DataZapp_Address2 || null,
+      City: contactData.City || contactData.DataZapp_City || contactData.IPCity || null,
+      State: contactData.State || contactData.DataZapp_State || contactData.IPState || null,
+      Country: contactData.Country || contactData.DataZapp_Country || contactData.IPCountry || null,
+      ZipCode: contactData.ZipCode || contactData.Zipcode || contactData.DataZapp_Zipcode || null,
+      
+      // Address Metadata
+      AddressStatus: contactData.AddressStatus || contactData.DataZapp_AddressStatus || null,
+      AddressType: contactData.AddressType || contactData.DataZapp_AddressType || null,
+      ResidentialAddressFlag: contactData.ResidentialAddressFlag || contactData.DataZapp_ResidentialAddressFlag || null,
+      
+      // IP Information
+      IPAddress: contactData.IPAddress || ip,
+      IPCity: contactData.IPCity || null,
+      IPState: contactData.IPState || null,
+      IPCountry: contactData.IPCountry || null,
+      IPLatitude: contactData.IPLatitude || null,
+      IPLongitude: contactData.IPLongitude || null,
+      ISP: contactData.Organization || contactData.ISP || null,
+      
+      // Confidence Score
+      Confidence: contactData.confidence || contactData.Confidence || null,
+      
+      // Raw response for debugging
+      _rawResponse: contactData
     };
 
-    console.log('📤 Sending to DataZapp:', JSON.stringify(requestBody, null, 2));
+    console.log('✅ Successfully mapped contact data');
+    console.log('📧 Email:', mappedData.Email);
+    console.log('👤 Name:', `${mappedData.FirstName} ${mappedData.LastName}`);
+    console.log('📞 Phone:', mappedData.Phone);
+    console.log('🎯 Confidence:', mappedData.Confidence);
 
-    const response = await axios.post(DATAZAPP_API_URL, requestBody, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      timeout: 30000
-    });
-
-    console.log('📊 DataZapp raw response:', JSON.stringify(response.data, null, 2));
-    console.log('📊 Response is array:', Array.isArray(response.data));
-    console.log('📊 Response length:', response.data?.length);
-    
-    if (response.data && response.data.length > 0) {
-      console.log('📊 First result:', JSON.stringify(response.data[0], null, 2));
-    }
-
-    console.log('✅ DataZapp response status:', response.status);
-
-    // Handle v2 array response
-    if (response.data && Array.isArray(response.data) && response.data.length > 0) {
-      const result = response.data[0];
-      
-      console.log('✅ Test successful - returning data');
-      return res.json({
-        success: true,
-        data: result,
-        raw: response.data
-      });
-    } else {
-      console.log('⚠️ Empty response from DataZapp');
-      return res.json({
-        success: false,
-        message: 'No data available for this IP',
-        raw: response.data
-      });
-    }
+    return res.json(mappedData);
 
   } catch (error) {
-    console.error('❌ Test error:', error.message);
-    if (error.response) {
-      console.error('📄 Error response:', JSON.stringify(error.response.data, null, 2));
-      console.error('📟 Error status:', error.response.status);
+    console.error('❌ DataZapp API Error:', error.response?.status, error.response?.data || error.message);
+    
+    if (error.response?.status === 404) {
+      return res.status(404).json({ 
+        error: 'No data available for this IP',
+        message: error.response?.data?.message || 'Empty response from DataZapp'
+      });
     }
     
-    res.status(500).json({ 
+    return res.status(error.response?.status || 500).json({ 
+      error: 'DataZapp API error',
+      message: error.message,
+      details: error.response?.data
+    });
+  }
+});
+
+// Test endpoint with known good IP
+app.get('/api/test', async (req, res) => {
+  try {
+    const testIP = req.query.ip || '72.186.103.112'; // IP from CSV with known data
+    const datazappKey = process.env.DATAZAPP_API_KEY;
+
+    console.log(`🧪 Testing with IP: ${testIP}`);
+
+    const datazappResponse = await axios.post(
+      'https://secureapi.datazapp.com/Appendv2',
+      {
+        APIKey: datazappKey,
+        AppendType: 2,
+        Records: [{ IPAddress: testIP }]
+      },
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 30000
+      }
+    );
+
+    console.log('📦 Full Test Response:', JSON.stringify(datazappResponse.data, null, 2));
+
+    const contactData = datazappResponse.data?.ResponseDetail?.Data?.[0];
+
+    return res.json({
+      testIP,
+      fullResponse: datazappResponse.data,
+      contactData: contactData,
+      hasPersonalData: !!(contactData?.FirstName || contactData?.Email || contactData?.Cell)
+    });
+
+  } catch (error) {
+    console.error('❌ Test Error:', error.response?.data || error.message);
+    return res.status(500).json({ 
       error: 'Test failed',
       message: error.message,
       details: error.response?.data
@@ -121,100 +198,7 @@ app.post('/api/test', authenticateApiKey, async (req, res) => {
   }
 });
 
-// Main reverse IP append endpoint
-app.post('/api/reverse-ip-append', authenticateApiKey, async (req, res) => {
-  try {
-    console.log('🚀 Reverse IP Append called');
-    console.log('📝 Request body:', JSON.stringify(req.body, null, 2));
-    
-    const { ipAddresses } = req.body;
-    
-    if (!ipAddresses || !Array.isArray(ipAddresses) || ipAddresses.length === 0) {
-      return res.status(400).json({ error: 'Invalid or missing ipAddresses array' });
-    }
-
-    const ipAddress = ipAddresses[0];
-    console.log('🔍 Processing IP:', ipAddress);
-
-    // DataZapp v2 API format
-    const requestBody = {
-      ApiKey: DATAZAPP_API_KEY,
-      AppendModule: 'ReverseIPAppend',
-      AppendType: 2,  // Changed to AppendType 2
-      Data: [
-        {
-          IP: ipAddress
-        }
-      ]
-    };
-
-    console.log('📤 Calling DataZapp API...');
-    
-    const response = await axios.post(DATAZAPP_API_URL, requestBody, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      timeout: 30000
-    });
-
-    console.log('📊 DataZapp raw response:', JSON.stringify(response.data, null, 2));
-    console.log('📊 Response is array:', Array.isArray(response.data));
-    console.log('📊 Response length:', response.data?.length);
-    
-    if (response.data && response.data.length > 0) {
-      console.log('📊 First result:', JSON.stringify(response.data[0], null, 2));
-    }
-
-    console.log('✅ DataZapp API response status:', response.status);
-
-    // Handle v2 array response
-    if (response.data && Array.isArray(response.data) && response.data.length > 0) {
-      const result = response.data[0];
-      
-      // Check if we actually got data
-      if (result && Object.keys(result).length > 1) { // More than just IP field
-        console.log('✅ Valid data received, returning result');
-        return res.json(result);
-      } else {
-        console.log('⚠️ Empty result object from DataZapp');
-        return res.status(404).json({
-          error: 'No data available for this IP',
-          message: 'Empty response from DataZapp'
-        });
-      }
-    } else {
-      console.log('⚠️ Empty or invalid response array from DataZapp');
-      return res.status(404).json({
-        error: 'No data available for this IP',
-        message: 'Empty response from DataZapp'
-      });
-    }
-
-  } catch (error) {
-    console.error('❌ Error calling DataZapp:', error.message);
-    
-    if (error.response) {
-      console.error('📄 DataZapp error response:', JSON.stringify(error.response.data, null, 2));
-      console.error('📟 Status:', error.response.status);
-      
-      return res.status(error.response.status).json({
-        error: 'DataZapp API error',
-        message: error.response.data,
-        status: error.response.status
-      });
-    }
-    
-    res.status(500).json({ 
-      error: 'Internal proxy error',
-      message: error.message 
-    });
-  }
-});
-
 app.listen(PORT, () => {
-  console.log(`🚀 DataZapp Proxy running on port ${PORT}`);
-  console.log(`🔑 DataZapp API Key configured: ${!!DATAZAPP_API_KEY}`);
-  console.log(`🔑 Proxy API Key configured: ${!!PROXY_API_KEY}`);
-  console.log(`🌐 DataZapp URL: ${DATAZAPP_API_URL}`);
+  console.log(`🚀 DataZapp Proxy Server running on port ${PORT}`);
+  console.log(`🔑 API Key configured: ${process.env.DATAZAPP_API_KEY ? 'Yes' : 'No'}`);
 });
