@@ -1,65 +1,82 @@
 const express = require('express');
 const axios = require('axios');
-const cors = require('cors');
-require('dotenv').config();
-
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-// Middleware
 app.use(express.json());
-app.use(cors());
 
-// Authentication middleware - protect your proxy
-const authenticate = (req, res, next) => {
-  const apiKey = req.headers['x-api-key'];
+// CORS middleware
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   
-  if (!apiKey || apiKey !== process.env.PROXY_API_KEY) {
-    return res.status(401).json({ error: 'Unauthorized' });
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
   }
   
   next();
-};
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', message: 'DataZapp Proxy Server Running' });
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Reverse IP Append endpoint - EXTRACT PERSON DATA FROM WRAPPER
-app.post('/api/reverse-ip-append', authenticate, async (req, res) => {
+// Reverse IP Append endpoint
+app.post('/api/reverse-ip-append', async (req, res) => {
   try {
-    const { ipAddresses } = req.body;
+    const { ip } = req.body;
     
-    if (!ipAddresses || !Array.isArray(ipAddresses)) {
-      return res.status(400).json({ 
-        error: 'ipAddresses array is required' 
-      });
+    if (!ip) {
+      return res.status(400).json({ error: 'IP address is required' });
     }
 
-    console.log(`Processing ${ipAddresses.length} IP addresses...`);
+    console.log('🔍 Processing IP:', ip);
+
+    // Get credentials from environment
+    const username = process.env.DATAZAPP_USER;
+    const password = process.env.DATAZAPP_PASSWORD;
+    const apiKey = process.env.DATAZAPP_API_KEY;
+
+    if (!username || !password || !apiKey) {
+      console.error('❌ Missing DataZapp credentials');
+      return res.status(500).json({ error: 'DataZapp credentials not configured' });
+    }
+
+    console.log('🔑 Using credentials:', { username, apiKey: apiKey.substring(0, 10) + '...' });
+
+    // Prepare request to DataZapp
+    const ipAddresses = [ip];
     
-    // Call DataZapp API with correct format
+    const requestBody = {
+      Username: username,
+      Password: password,
+      ApiKey: apiKey,
+      AppendType: 4, // Advanced IP Append
+      Data: ipAddresses.map(ip => ({ IP: ip }))
+    };
+
+    console.log('📡 Calling DataZapp API with AppendType 4 (Advanced)...');
+    console.log('Request body:', JSON.stringify(requestBody, null, 2));
+
+    // Call DataZapp API
     const response = await axios.post(
-      'https://secureapi.datazapp.com/Appendv2',
+      'https://api.datazapp.com/api/DataAppend',
+      requestBody,
       {
-        ApiKey: process.env.DATAZAPP_API_KEY,
-        AppendModule: 'ReverseIPAppend',
-        AppendType: 2,
-        Data: ipAddresses.map(ip => ({ IP: ip }))
-      },
-      {
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         timeout: 30000
       }
     );
 
     console.log('✅ DataZapp full response:', JSON.stringify(response.data, null, 2));
     
-    // CRITICAL FIX: Extract the person data from the nested Data array
     const datazappResponse = response.data;
     
-    // Check if we got data
+    // Extract the person data from the Data array
     if (!datazappResponse.Data || !Array.isArray(datazappResponse.Data) || datazappResponse.Data.length === 0) {
       console.log('⚠️ No person data in DataZapp response');
       return res.status(404).json({
@@ -71,79 +88,67 @@ app.post('/api/reverse-ip-append', authenticate, async (req, res) => {
       });
     }
 
-    // Return just the first person record (what the edge function expects)
+    // Return just the person data (first element)
     const personData = datazappResponse.Data[0];
     console.log('✅ Extracted person data:', JSON.stringify(personData, null, 2));
     
     return res.json(personData);
 
   } catch (error) {
-    console.error('❌ DataZapp API Error:', error.message);
-    console.error('Error response:', error.response?.data);
-    console.error('Error status:', error.response?.status);
+    console.error('❌ Error calling DataZapp:', error.response?.data || error.message);
     
-    return res.status(error.response?.status || 500).json({
-      error: error.message,
-      details: error.response?.data
+    if (error.response) {
+      return res.status(error.response.status).json({
+        error: 'DataZapp API error',
+        details: error.response.data
+      });
+    }
+    
+    return res.status(500).json({
+      error: 'Internal server error',
+      details: error.message
     });
   }
 });
 
-// Get visitor pixel data endpoint
-app.post('/api/visitor-pixel-data', authenticate, async (req, res) => {
+// Test endpoint
+app.post('/api/test', async (req, res) => {
   try {
-    const { pixelId, startDate, endDate } = req.body;
-    
-    const datazappUrl = 'https://api.datazapp.com/v1/pixel/visitors';
-    
-    const datazappPayload = {
-      Token: process.env.DATAZAPP_TOKEN,
-      PixelId: pixelId,
-      StartDate: startDate,
-      EndDate: endDate
-    };
+    const username = process.env.DATAZAPP_USER;
+    const password = process.env.DATAZAPP_PASSWORD;
+    const apiKey = process.env.DATAZAPP_API_KEY;
 
-    const response = await axios.post(datazappUrl, datazappPayload, {
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-
-    res.json({
-      success: true,
-      data: response.data
-    });
-
-  } catch (error) {
-    console.error('DataZapp Pixel API Error:', error.message);
-    
-    res.status(error.response?.status || 500).json({
-      success: false,
-      error: error.message,
-      details: error.response?.data
-    });
-  }
-});
-
-// Generic DataZapp API proxy (for other endpoints)
-app.post('/api/datazapp-proxy', authenticate, async (req, res) => {
-  try {
-    const { endpoint, payload } = req.body;
-    
-    if (!endpoint) {
-      return res.status(400).json({ error: 'endpoint is required' });
+    if (!username || !password || !apiKey) {
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Missing credentials',
+        hasUsername: !!username,
+        hasPassword: !!password,
+        hasApiKey: !!apiKey
+      });
     }
 
-    const datazappPayload = {
-      Token: process.env.DATAZAPP_TOKEN,
-      ...payload
+    const requestBody = {
+      Username: username,
+      Password: password,
+      ApiKey: apiKey,
+      AppendType: 4, // Advanced IP Append
+      Data: [{ IP: '8.8.8.8' }]
     };
 
-    const response = await axios.post(endpoint, datazappPayload, {
-      headers: {
-        'Content-Type': 'application/json'
+    console.log('Testing DataZapp with AppendType 4...');
+
+    const response = await axios.post(
+      'https://api.datazapp.com/api/DataAppend',
+      requestBody,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        timeout: 30000
       }
-    });
+    );
 
     res.json({
       success: true,
@@ -151,18 +156,18 @@ app.post('/api/datazapp-proxy', authenticate, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('DataZapp Generic API Error:', error.message);
-    
-    res.status(error.response?.status || 500).json({
+    console.error('Test error:', error.response?.data || error.message);
+    res.status(500).json({
       success: false,
-      error: error.message,
-      details: error.response?.data
+      error: error.response?.data || error.message
     });
   }
 });
 
-// Start server
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`DataZapp Proxy Server running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
+  console.log(`🚀 DataZapp Proxy running on port ${PORT}`);
+  console.log(`📍 Health check: http://localhost:${PORT}/health`);
+  console.log(`📍 Reverse IP Append: POST http://localhost:${PORT}/api/reverse-ip-append`);
+  console.log(`📍 Test endpoint: POST http://localhost:${PORT}/api/test`);
 });
